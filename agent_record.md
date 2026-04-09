@@ -113,10 +113,68 @@ mnistweb/
 | Next.js 16 Turbopack 與 webpack config 衝突 | 預設啟用 Turbopack | 改用 `turbopack: {}` 設定 |
 | 跨域開發資源被阻擋 | Next.js 安全限制 | 設定 `allowedDevOrigins` |
 
+## 伺服器部署紀錄（2026-04-09）
+
+### 部署環境
+
+- **伺服器：** Ubuntu 24.04 LTS
+- **公網 IPv4：** `139.162.47.142`
+- **公網 IPv6：** `2400:8901::2000:d1ff:fea3:8ef2`
+- **網域：** `yukria.com`（Cloudflare DNS）
+- **Node.js：** v22（透過 NodeSource 安裝）
+- **反向代理：** Nginx 1.24
+
+### 部署步驟
+
+1. **生成 SSH Key** 並加入 GitHub，clone repo 到 `/root/mnistweb`
+2. **加大 Swap**：伺服器只有 ~1GB RAM，`npm install` 會 OOM，新增 2GB swap file（`/swapfile2`）
+3. **安裝依賴與建置：**
+   ```bash
+   npm install
+   npm run build
+   ```
+4. **建立 systemd 服務** `/etc/systemd/system/mnistweb.service`，讓 Next.js 以 production 模式在 port 3000 運行
+5. **設定 Nginx 反向代理** `/etc/nginx/sites-available/yukria.com`，監聽 80 port（IPv4 + IPv6），反向代理到 `127.0.0.1:3000`
+6. **Cloudflare DNS 設定：**
+   - A 記錄 `@` → `139.162.47.142`（Proxied）
+   - AAAA 記錄 `@` → `2400:8901::2000:d1ff:fea3:8ef2`（Proxied）
+   - SSL/TLS 模式設為 Flexible
+
+### 遇到的問題
+
+| 問題 | 原因 | 解決方式 |
+|------|------|----------|
+| SSH clone 失敗 | 伺服器無 SSH key | 生成 ed25519 key 並加入 GitHub |
+| `npm install` 被 OOM Killed（exit 137） | 伺服器僅 ~1GB RAM + 496MB swap | 新增 2GB swap file `/swapfile2` |
+| Cloudflare 回傳 521 錯誤 | Nginx 未監聽 IPv6，Cloudflare 透過 IPv6 連入 | Nginx 加上 `listen [::]:80` |
+| 521 仍持續 | Cloudflare SSL 模式為 Full，但伺服器無 SSL 憑證 | 改為 Flexible 模式 |
+
+### 服務管理
+
+```bash
+# 查看服務狀態
+systemctl status mnistweb
+
+# 重啟服務
+systemctl restart mnistweb
+
+# 重啟 Nginx
+systemctl restart nginx
+```
+
+### 設定檔位置
+
+| 檔案 | 路徑 |
+|------|------|
+| Next.js 專案 | `/root/mnistweb` |
+| systemd 服務 | `/etc/systemd/system/mnistweb.service` |
+| Nginx 設定 | `/etc/nginx/sites-available/yukria.com` |
+| Swap file | `/swapfile2` |
+
 ## 啟動方式
 
 ```bash
-# Production 模式
-npx next build
-npx next start --hostname 0.0.0.0 --port 25000
+# Production 模式（已由 systemd 管理，一般不需手動執行）
+npm run build
+npm run start
 ```
